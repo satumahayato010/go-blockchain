@@ -8,12 +8,18 @@ import (
 	"time"
 )
 
+const (
+	MINING_DIFFICULTY = 3
+	MINING_SENDER     = "THE BLOCKCHAIN"
+	MINING_REWARD     = 1.0
+)
+
 // Block Blockの情報が格納されている。構造体
 // フィールド四つの情報を一塊として、ブロックを作る。それをハッシュ化する。
 type Block struct {
+	timestamp    int64 // 取引した時のタイムスタンプ
 	nonce        int
 	previousHash [32]byte       // 前のハッシュの情報が入っている。
-	timestamp    int64          // 取引した時のタイムスタンプ
 	transactions []*Transaction // 取引内容 Pool
 }
 
@@ -40,7 +46,6 @@ func (b *Block) Print() {
 // Hash Block構造体をJSON形式にして、sha256(ハッシュ関数）でハッシュ化する。
 func (b *Block) Hash() [32]byte {
 	m, _ := json.Marshal(b)
-	fmt.Println(string(m))
 	return sha256.Sum256([]byte(m))
 }
 
@@ -62,15 +67,17 @@ func (b *Block) MarshalJSON() ([]byte, error) {
 
 // Blockchain Block同士をchain（つなぐ）情報が格納されている構造体。
 type Blockchain struct {
-	transactionPool []*Transaction
-	chain           []*Block
+	transactionPool   []*Transaction
+	chain             []*Block
+	blockchainAddress string
 }
 
 // NewBlockchain Blockchain構造体のコンストラクタ。
-func NewBlockchain() *Blockchain {
+func NewBlockchain(blockchainAddress string) *Blockchain {
 	b := &Block{}
 	bc := new(Blockchain)
 	bc.CreateBlock(0, b.Hash())
+	bc.blockchainAddress = blockchainAddress
 	return bc
 }
 
@@ -99,6 +106,63 @@ func (bc *Blockchain) Print() {
 func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32) {
 	t := NewTransaction(sender, recipient, value)
 	bc.transactionPool = append(bc.transactionPool, t)
+}
+
+// CopyTransactionPool Blockchain構造体のプールのフィールドの値を、コピーするメソッド。
+func (bc *Blockchain) CopyTransactionPool() []*Transaction {
+	transactions := make([]*Transaction, 0)
+	for _, t := range bc.transactionPool {
+		transactions = append(transactions,
+			NewTransaction(t.senderBlockchainAddress,
+				t.recipientBlockchainAddress,
+				t.value))
+	}
+	return transactions
+}
+
+// ValidProof nonceの解が先頭０三つかをバリデーションする関数。
+func (bc *Blockchain) ValidProof(nonce int, previousHash [32]byte, transactions []*Transaction, difficulty int) bool {
+	zeros := strings.Repeat("0", difficulty)
+	guessBlock := Block{0, nonce, previousHash, transactions}
+	guessHashStr := fmt.Sprintf("%x", guessBlock.Hash())
+	return guessHashStr[:difficulty] == zeros
+}
+
+// ProofOfWork nonceの先頭が０三つになるまで、解を求めるメソッド。
+func (bc *Blockchain) ProofOfWork() int {
+	transactions := bc.CopyTransactionPool()
+	previousHash := bc.LastBlock().Hash()
+	nonce := 0
+	for !bc.ValidProof(nonce, previousHash, transactions, MINING_DIFFICULTY) {
+		nonce += 1
+	}
+	return nonce
+}
+
+func (bc *Blockchain) Mining() bool {
+	bc.AddTransaction(MINING_SENDER, bc.blockchainAddress, MINING_REWARD)
+	nonce := bc.ProofOfWork()
+	previousHash := bc.LastBlock().Hash()
+	bc.CreateBlock(nonce, previousHash)
+	return true
+}
+
+// CalculateTotalAmount トランザクション（取引）の金額を計算するメソッド。
+func (bc *Blockchain) CalculateTotalAmount(blockchainAddress string) float32 {
+	var totalAmount float32 = 0.0
+	for _, b := range bc.chain {
+		for _, t := range b.transactions {
+			value := t.value
+			if blockchainAddress == t.recipientBlockchainAddress {
+				totalAmount += value
+			}
+
+			if blockchainAddress == t.senderBlockchainAddress {
+				totalAmount -= value
+			}
+		}
+	}
+	return totalAmount
 }
 
 // Transaction 取引データを格納する構造体。自分のアドレス、取引相手のアドレス、いくら送ったかの値。
