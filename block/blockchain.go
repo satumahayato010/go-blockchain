@@ -1,9 +1,12 @@
-package main
+package block
 
 import (
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go-trading/utils"
+	"log"
 	"strings"
 	"time"
 )
@@ -102,10 +105,35 @@ func (bc *Blockchain) Print() {
 	fmt.Printf("%s\n", strings.Repeat("*", 25))
 }
 
-// AddTransaction トランザクションプールの中に、トランザクションを追加するメソッド。
-func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32) {
+// AddTransaction トランザクションプールの中に、トランザクションを追加するメソッド 検証してる。
+func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32,
+	senderPublicKey *ecdsa.PublicKey, s *utils.Signature) bool {
 	t := NewTransaction(sender, recipient, value)
-	bc.transactionPool = append(bc.transactionPool, t)
+
+	if sender == MINING_SENDER {
+		bc.transactionPool = append(bc.transactionPool, t)
+		return true
+	}
+
+	if bc.VerifyTransactionSignature(senderPublicKey, s, t) {
+		if bc.CalculateTotalAmount(sender) < value {
+			log.Println("ERROR: Not enough balance in a wallet")
+			return false
+		}
+		bc.transactionPool = append(bc.transactionPool, t)
+		return true
+	} else {
+		log.Println("ERROR: Verify Transaction")
+	}
+	return false
+}
+
+// VerifyTransactionSignature トランザクションとシグネチャを検証するメソッド。
+func (bc *Blockchain) VerifyTransactionSignature(
+	senderPublicKey *ecdsa.PublicKey, s *utils.Signature, t *Transaction) bool {
+	m, _ := json.Marshal(t)
+	h := sha256.Sum256([]byte(m))
+	return ecdsa.Verify(senderPublicKey, h[:], s.R, s.S)
 }
 
 // CopyTransactionPool Blockchain構造体のプールのフィールドの値を、コピーするメソッド。
@@ -140,7 +168,7 @@ func (bc *Blockchain) ProofOfWork() int {
 }
 
 func (bc *Blockchain) Mining() bool {
-	bc.AddTransaction(MINING_SENDER, bc.blockchainAddress, MINING_REWARD)
+	bc.AddTransaction(MINING_SENDER, bc.blockchainAddress, MINING_REWARD, nil, nil)
 	nonce := bc.ProofOfWork()
 	previousHash := bc.LastBlock().Hash()
 	bc.CreateBlock(nonce, previousHash)
@@ -200,6 +228,4 @@ func (t *Transaction) MarshalJSON() ([]byte, error) {
 }
 
 func main() {
-	blockChain := NewBlockchain()
-	blockChain.Print()
 }
